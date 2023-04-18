@@ -1,4 +1,4 @@
-from recordtype import recordtype
+import pandas as pd
 import random
 
 SHIPS = ["LJ", "SJ", "Xer", "SS", "Sxer", "BB", "Zerri", "RIP", "PF", "RP", "KT", "GT", "Kolo", "Rec", "Spio"]
@@ -142,14 +142,12 @@ LF_TECHS = {
     "Rec": 0
 }
 
-Ship = recordtype("ship", "type hull shield")
-
 def construct_fleet(fleet_spec: dict()):
     fleet = list()
     for ship, number in fleet_spec.items():
         for _ in range(number):
-            fleet.append(Ship(ship, HULL[ship], SHIELD[ship]))
-    return fleet
+            fleet.append([ship, HULL[ship], SHIELD[ship]])
+    return pd.DataFrame(fleet, columns=["type", "hull", "shield"])
 
 def deconstruct_fleet(fleet: dict()):
     fleet_spec = dict()
@@ -163,34 +161,32 @@ def deconstruct_fleet(fleet: dict()):
 def fire_single(ship, target):
     target.hull = max(target.hull - (DMG[ship.type] - target.shield), 0)
     target.shield = max(target.shield - DMG[ship.type], 0)
+    return target
 
-def fire(attacker, defender):
-    for ship in attacker:
-        fire_single(ship, random.choice(defender))
-        if ship.type in RF.keys():
-            for rp_target, rapidfire in RF[ship.type].items():
-                rp_targets = [s for s in defender if rp_target == s.type ]
-                if len(rp_targets) > 0:
-                    while random.random() < (rapidfire-1)/rapidfire:
-                        fire_single(ship, random.choice(rp_targets))
-    for ship in defender:
-        ship.shield = SHIELD[ship.type]
-
-def remove_destroyed(fleet):
-    for ship in fleet:
-        if ship.hull == 0:
-            fleet.remove(ship)
+def fire(ship, defender):
+    if (defender["hull"] == 0).all():
+        return
+    target = defender[defender["hull"] > 0].sample(1).index[0]
+    defender.iloc[target] = fire_single(ship, defender.iloc[target])
+    if ship.type in RF.keys():
+        for rp_target, rapidfire in RF[ship.type].items():
+            rp_targets = defender[(defender["type"] == rp_target) & (defender["hull"] > 0)].index
+            if len(rp_targets) > 0:
+                while random.random() < (rapidfire-1)/rapidfire:
+                    target = random.choice(rp_targets)
+                    defender.iloc[target] = fire_single(ship, defender.iloc[target])
 
 def sim(fleet_spec1: dict(), fleet_spec2: dict()):
     fleet1 = construct_fleet(fleet_spec1)
     fleet2 = construct_fleet(fleet_spec2)
     for _ in range(6):
-        if len(fleet1) == 0 or len(fleet2) == 0:
+        if (fleet1["hull"] == 0).all() or (fleet2["hull"] == 0).all():
             break
-        fire(fleet1, fleet2)
-        fire(fleet2, fleet1)
-        remove_destroyed(fleet1)
-        remove_destroyed(fleet2)
+        orig_fleet2 = fleet2.copy(deep=True)
+        fleet1[fleet1["hull"] > 0].apply(lambda x: fire(x, fleet2), axis=1)
+        orig_fleet2[orig_fleet2["hull"] > 0].apply(lambda x: fire(x, fleet1), axis=1)
+        fleet1.shield = fleet1["type"].apply(lambda x: SHIELD[x])
+        fleet2.shield = fleet2["type"].apply(lambda x: SHIELD[x])
     return fleet1, fleet2
 
 def main():
@@ -198,19 +194,10 @@ def main():
     avg_fleet1 = dict()
     avg_fleet2 = dict()
     for round in range(RUNS):
-        fleet1, fleet2 = sim({"SS": 1500},{"Xer": 3000})
-        fleet1, fleet2 = deconstruct_fleet(fleet1), deconstruct_fleet(fleet2)
-        print(f"Round {round+1}: ", fleet1, "vs", fleet2)
-        for ship, amount in fleet1.items():
-            avg_fleet1[ship] = avg_fleet1[ship] + amount if ship in avg_fleet1.keys() else amount
-        for ship, amount in fleet2.items():
-            avg_fleet2[ship] = avg_fleet2[ship] + amount if ship in avg_fleet2.keys() else amount
-    for ship in avg_fleet1.keys():
-        avg_fleet1[ship] = int(round(avg_fleet1[ship] / RUNS, 0))
-    for ship in avg_fleet2.keys():
-        avg_fleet2[ship] = int(round(avg_fleet2[ship] / RUNS, 0))
-    print("Fleet1:", avg_fleet1)
-    print("Fleet2:", avg_fleet2)
+        fleet1, fleet2 = sim({"Xer": 64},{"LJ": 1000})
+        fleet1 = fleet1[fleet1["hull"] > 0].groupby("type").count()["hull"]
+        fleet2 = fleet2[fleet2["hull"] > 0].groupby("type").count()["hull"]
+        print(f"Round {round+1}: ", fleet1.to_dict(), "vs", fleet2.to_dict())
 
 if __name__ == '__main__':
     main()
