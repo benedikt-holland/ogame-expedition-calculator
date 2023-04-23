@@ -1,5 +1,7 @@
 import pandas as pd
+import numpy as np
 import random
+import math
 
 SHIPS = ["LJ", "SJ", "Xer", "SS", "Sxer", "BB", "Zerri", "RIP", "PF", "RP", "KT", "GT", "Kolo", "Rec", "Spio"]
 
@@ -142,12 +144,16 @@ LF_TECHS = {
     "Rec": 0
 }
 
+replace_negative = np.vectorize(lambda x: x if x > 0 else 0)
+
 def construct_fleet(fleet_spec: dict()):
     fleet = list()
     for ship, number in fleet_spec.items():
         for _ in range(number):
-            fleet.append([ship, HULL[ship], SHIELD[ship]])
-    return pd.DataFrame(fleet, columns=["type", "hull", "shield"])
+            fleet.append([ship, HULL[ship], SHIELD[ship], DMG[ship]])
+    data = pd.DataFrame(fleet, columns=["type", "hull", "shield", "dmg"])
+    data.index.name = "index"
+    return data
 
 def deconstruct_fleet(fleet: dict()):
     fleet_spec = dict()
@@ -163,7 +169,7 @@ def fire_single(ship, target):
     target.shield = max(target.shield - DMG[ship.type], 0)
     return target
 
-def fire(ship, defender):
+def fire1(ship, defender):
     if (defender["hull"] == 0).all():
         return
     target = defender[defender["hull"] > 0].sample(1).index[0]
@@ -176,28 +182,64 @@ def fire(ship, defender):
                     target = random.choice(rp_targets)
                     defender.iloc[target] = fire_single(ship, defender.iloc[target])
 
-def sim(fleet_spec1: dict(), fleet_spec2: dict()):
-    fleet1 = construct_fleet(fleet_spec1)
-    fleet2 = construct_fleet(fleet_spec2)
-    for _ in range(6):
-        if (fleet1["hull"] == 0).all() or (fleet2["hull"] == 0).all():
+def fire(attacker, defender):
+    target_idx = defender[defender["hull"] > 0].sample(attacker[attacker["hull"] > 0].shape[0], replace=True).index
+    targets = defender.iloc[target_idx]
+    target_count = targets.groupby("index").count()["hull"]
+    attack_idx = 0
+    # Worst case: Damage is distributed evenly accross the defender fleet
+    # Best case: Damage is concentrated on a few ships
+    # How many attacker ships need to fire on one defender ship to destroy it (in the worst case) -> Maximum range
+    max_shots = attacker["dmg"].sort_values().cumsum()
+    max_shots = (max_shots <= (defender["hull"] + defender["shield"]).min()).sum() + 1
+    # Min: 0 -> worst case, Max: 2 -> best case
+    # Min: 0, Max: min(defender_size, attack_size)
+    shots_left = attacker.shape[0]
+    for i in range(max_shots):
+        max_count = min(attacker[attacker["hull"] > 0].shape[0], defender[defender["hull"] > 0].shape[0])
+        sample_size = min(random.random() * max_count, shots_left)
+        shots_left -= sample_size
+        target_idx = defender[defender["hull"] > 0].sample(attacker[attacker["hull"] > 0].shape[0]).index
+        target_idx = target_count[target_count > i].index
+        targets = defender.iloc[target_idx] 
+        attack_dmg = attacker.iloc[attack_idx:attack_idx+targets.shape[0]].dmg.values
+        defender.iloc[target_idx, 1] = (targets.hull.values - replace_negative(attack_dmg - targets.shield.values))
+        defender.iloc[target_idx, 2] = replace_negative(targets.shield.values - attack_dmg)
+        temp = targets[targets["hull"] < -attack_dmg]
+        #assert temp.shape[0] == 0
+        attack_idx += targets.shape[0]
+    defender.shield = defender.type.apply(lambda x: SHIELD[x])
+    return defender
+
+def sim(attacker_spec: dict(), defender_spec: dict()):
+    attacker = construct_fleet(attacker_spec)
+    defender = construct_fleet(defender_spec)
+    for rounds in range(6):
+        if (attacker["hull"] == 0).all() or (defender["hull"] == 0).all():
             break
-        orig_fleet2 = fleet2.copy(deep=True)
-        fleet1[fleet1["hull"] > 0].apply(lambda x: fire(x, fleet2), axis=1)
-        orig_fleet2[orig_fleet2["hull"] > 0].apply(lambda x: fire(x, fleet1), axis=1)
-        fleet1.shield = fleet1["type"].apply(lambda x: SHIELD[x])
-        fleet2.shield = fleet2["type"].apply(lambda x: SHIELD[x])
-    return fleet1, fleet2
+        orig_defender = defender.copy(deep=True)
+        defender = fire(attacker, defender)
+        attacker = fire(orig_defender, attacker)
+    return attacker, defender, rounds+1
 
 def main():
-    RUNS = 1
+    RUNS = 3
     avg_fleet1 = dict()
     avg_fleet2 = dict()
-    for round in range(RUNS):
-        fleet1, fleet2 = sim({"Xer": 64},{"LJ": 1000})
+    total_rounds = 0
+    for i in range(RUNS):
+        fleet1, fleet2, rounds = sim({"SS": 15000}, {"Xer": 30000})
+        total_rounds += rounds
         fleet1 = fleet1[fleet1["hull"] > 0].groupby("type").count()["hull"]
         fleet2 = fleet2[fleet2["hull"] > 0].groupby("type").count()["hull"]
-        print(f"Round {round+1}: ", fleet1.to_dict(), "vs", fleet2.to_dict())
+        print(f"Round {i+1}: ", fleet1.to_dict(), "vs", fleet2.to_dict())
+        for ship, count in fleet1.to_dict().items():
+            avg_fleet1[ship] = avg_fleet1[ship] + count / RUNS if ship in avg_fleet1.keys() else count / RUNS
+        for ship, count in fleet2.to_dict().items():
+            avg_fleet2[ship] = avg_fleet2[ship] + count / RUNS if ship in avg_fleet2.keys() else count / RUNS
+    total_rounds = int(round(total_rounds/RUNS, 0))
+    print("Attacker wins" if avg_fleet2 == {} else ("Defender wins" if avg_fleet1 == {} else "Draw"), f"after {total_rounds} round{'s' if total_rounds > 1 else ''}")
+    print(avg_fleet1, "vs", avg_fleet2)
 
 if __name__ == '__main__':
     main()
