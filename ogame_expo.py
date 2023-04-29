@@ -170,7 +170,7 @@ def fire_single(ship, target):
     return target
 
 def fire1(ship, defender):
-    if (defender["hull"] == 0).all():
+    if (defender["hull"] < 0).all():
         return
     target = defender[defender["hull"] > 0].sample(1).index[0]
     defender.iloc[target] = fire_single(ship, defender.iloc[target])
@@ -187,27 +187,17 @@ def fire(attacker, defender):
     targets = defender.iloc[target_idx]
     target_count = targets.groupby("index").count()["hull"]
     attack_idx = 0
-    # Worst case: Damage is distributed evenly accross the defender fleet
-    # Best case: Damage is concentrated on a few ships
-    # How many attacker ships need to fire on one defender ship to destroy it (in the worst case) -> Maximum range
-    max_shots = attacker["dmg"].sort_values().cumsum()
-    max_shots = (max_shots <= (defender["hull"] + defender["shield"]).min()).sum() + 1
-    # Min: 0 -> worst case, Max: 2 -> best case
-    # Min: 0, Max: min(defender_size, attack_size)
-    shots_left = attacker.shape[0]
-    for i in range(max_shots):
-        max_count = min(attacker[attacker["hull"] > 0].shape[0], defender[defender["hull"] > 0].shape[0])
-        sample_size = min(random.random() * max_count, shots_left)
-        shots_left -= sample_size
-        target_idx = defender[defender["hull"] > 0].sample(attacker[attacker["hull"] > 0].shape[0]).index
-        target_idx = target_count[target_count > i].index
+    for i in range(target_count.max()):
+        target_idx = targets[targets["hull"] > 0].sample(min((target_count > i).sum(), (targets["hull"] > 0).sum())).index
+        other_targets = defender.drop(target_idx)
+        target_idx = target_idx.union(other_targets[other_targets["hull"] > 0].sample(min((target_count > i).sum() - len(target_idx), 0)).index)
         targets = defender.iloc[target_idx] 
         attack_dmg = attacker.iloc[attack_idx:attack_idx+targets.shape[0]].dmg.values
         defender.iloc[target_idx, 1] = (targets.hull.values - replace_negative(attack_dmg - targets.shield.values))
         defender.iloc[target_idx, 2] = replace_negative(targets.shield.values - attack_dmg)
-        temp = targets[targets["hull"] < -attack_dmg]
-        #assert temp.shape[0] == 0
         attack_idx += targets.shape[0]
+        # TODO Rapidfire
+        # TODO Why are there no SS losses? Have another look at shot redistribution if the original target is already destroyed.
     defender.shield = defender.type.apply(lambda x: SHIELD[x])
     return defender
 
@@ -215,7 +205,7 @@ def sim(attacker_spec: dict(), defender_spec: dict()):
     attacker = construct_fleet(attacker_spec)
     defender = construct_fleet(defender_spec)
     for rounds in range(6):
-        if (attacker["hull"] == 0).all() or (defender["hull"] == 0).all():
+        if (attacker["hull"] < 0).all() or (defender["hull"] < 0).all():
             break
         orig_defender = defender.copy(deep=True)
         defender = fire(attacker, defender)
@@ -228,7 +218,7 @@ def main():
     avg_fleet2 = dict()
     total_rounds = 0
     for i in range(RUNS):
-        fleet1, fleet2, rounds = sim({"SS": 15000}, {"Xer": 30000})
+        fleet1, fleet2, rounds = sim({"Xer": 35}, {"SS": 15})
         total_rounds += rounds
         fleet1 = fleet1[fleet1["hull"] > 0].groupby("type").count()["hull"]
         fleet2 = fleet2[fleet2["hull"] > 0].groupby("type").count()["hull"]

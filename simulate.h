@@ -1,0 +1,1 @@
+int simulate(int *attacker, int att_size, int *defender, int def_size);
