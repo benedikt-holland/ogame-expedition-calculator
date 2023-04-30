@@ -19,8 +19,8 @@ HULL = {
     "BB": 7500,
     "Zerri": 11000,
     "RIP": 900000,
-    "PF": 23000,
-    "RP": 140000
+    "PF": 2300,
+    "RP": 14000
 }
 
 SHIELD =  {
@@ -218,6 +218,7 @@ def main():
     avg_fleet2 = dict()
     total_rounds = 0
     for i in range(RUNS):
+        # TODO sort by KT, GT, etc.
         fleet1, fleet2, rounds = sim({"Xer": 35}, {"SS": 15})
         total_rounds += rounds
         fleet1 = fleet1[fleet1["hull"] > 0].groupby("type").count()["hull"]
