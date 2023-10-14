@@ -1,4 +1,3 @@
-import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -24,7 +23,7 @@ TECHS = {
     10: 2,
     11: 2,
     12: 4,
-    13: 2,
+    13: 3,
     14: 4,
     15: 2,
     16: 2,
@@ -33,7 +32,7 @@ TECHS = {
 }
 
 
-EXCHANGE = [2.4, 1.4, 1]
+EXCHANGE = [2.7, 1.7, 1]
 
 
 def min_notna(x, y):
@@ -49,83 +48,94 @@ def calc_dse(ressources, exchange=EXCHANGE):
     return sum([base / factor for base, factor in zip(ressources, exchange)])
 
 
-def calc_cost(entry, offset=1):
-    return entry[0] * (entry[1] ** (entry[2] -1 + offset)) * (entry[2] + offset)
+def calc_cost(base_value, increase_factor, level, offset=1):
+    return base_value * (increase_factor  ** (level -1 + offset)) * (level + offset)
 
 
-def calc_bonus(entry, offset=0):
-    bonus_idx = 12
+def calc_bonus(entry, offset=0, tech_bonus=0):
     bonus_list = [0, 0, 0]
-    for idx, has_bonus in enumerate(entry[24:27]):
+    bonus_idx = 1
+    for idx, has_bonus in enumerate(entry[["metal", "crystal", "deuterium"]]):
         if has_bonus:
-            bonus_list[idx] = min_notna(entry[bonus_idx+2], calc_cost([entry[bonus_idx], entry[bonus_idx+1], entry[23]], offset=offset) / 100)
-            if pd.notna(entry[bonus_idx+2]):
-                bonus_list[idx] = min(has_bonus[idx], entry[bonus_idx+2])
-            if pd.notna(entry[bonus_idx+3]):
-                bonus_idx += 3
+            bonus_list[idx] = min_notna(entry[f"bonus {bonus_idx} max"], calc_cost(entry[f"bonus {bonus_idx} base value"], entry[f"bonus {bonus_idx} increase factor"], entry["level"], offset=offset) / 100) * (1+tech_bonus if entry["Type"] != "Building" else 1)
+            if f"bonus {bonus_idx+1} base value" in entry.index and pd.notna(entry[f"bonus {bonus_idx+1} base value"]):
+                bonus_idx += 1
     return calc_dse(bonus_list)
 
 
 def calc_tech_bonus(entry, offset=0):
-    return min_notna(entry[14], calc_cost([entry[12], entry[13], entry[23]], offset=offset) / 100)
+    return min_notna(entry["bonus 1 max"], calc_cost(entry["bonus 1 base value"], entry["bonus 1 increase factor"], entry["level"], offset=offset) / 100)
 
 
 def step(data, debug=False):
-    data["current_dse_bonus"] = data.apply(calc_bonus, axis=1)
+    tech_bonus = 0
     if data["tech"].any():
         tech_bonus = sum(data[data["tech"]].apply(calc_tech_bonus, axis=1))
-        data.loc[(~data["tech"]) & (data["Type"] != "Building"), "dse_bonus"] = data["dse_bonus_base"] * (1 + tech_bonus)
-        data.loc[data["tech"], "current_dse_bonus"] = sum(data[data["Type"] != "Building"]["current_dse_bonus"] * tech_bonus) / max(1, sum(data["tech"]))
-    data["new_dse_bonus"] = data["dse_bonus"] + sum(data["current_dse_bonus"])
+    data["new_dse_bonus"] = data.apply(lambda x: calc_bonus(x, tech_bonus=tech_bonus, offset=1), axis=1)
     if data["tech"].any():
-        data.loc[data["tech"], "new_dse_bonus"] = sum(data["current_dse_bonus"]) + sum(data[(~data["tech"]) & (data["Type"] != "Building")]["current_dse_bonus"]) * data[data["tech"]]["dse_bonus"]
-    data["new_dse_cost"] = data[["dse_base_cost", "metal increase factor", "level"]].apply(calc_cost, axis=1)
+        data.loc[data["tech"], "new_dse_bonus"] = data[data["tech"]].apply(lambda x: calc_tech_bonus(x, offset=1), axis=1)
+        data.loc[data["tech"], "new_dse_bonus"] = data[data["tech"]].apply(lambda x: data.apply(lambda y: calc_bonus(y, tech_bonus=x["new_dse_bonus"]), axis=1)[data["Type"] != "Building"].sum(), axis=1)
+    data["new_dse_cost"] = data.apply(lambda x: calc_cost(x["dse_base_cost"], x["metal increase factor"], x["level"]), axis=1)
     data["new_bonus_cost_ratio"] = data["new_dse_bonus"] / data["new_dse_cost"]
-    index = data.sort_values("new_bonus_cost_ratio", ascending=False).index[0]
+    index = data["new_bonus_cost_ratio"].idxmax()
+    data.loc[index, "level"] += 1
+    if data["tech"].any():
+        tech_bonus = sum(data[data["tech"]].apply(calc_tech_bonus, axis=1))
+    data["current_dse_bonus"] = data.apply(lambda x: calc_bonus(x, tech_bonus=tech_bonus), axis=1)
     if debug:
-        print(f"Upgrading {data.loc[index, 'Name EN']} to level {data.loc[index, 'level'] + 1}, new bonus: {data.loc[index, 'new_dse_bonus']}")
-    return index, data.loc[index, ["new_dse_cost", "new_dse_bonus"]] 
+        print(f"Upgrading {data.loc[index, 'Name EN']} to level {data.loc[index, 'level']}, new bonus: {data['current_dse_bonus'].sum()}")
+    return index
 
 
 def build_plot(lifeform, max_dse, debug=False):
-    data = pd.read_excel("lf_data.xlsx")
-    data.loc[data["Name EN"] == "High-Performance Transformer", ["bonus 1 base value", "bonus 1 increase factor", "bonus 1 max"]] = data.loc[data["Name EN"] == "High-Performance Transformer", ["bonus 2 base value", "bonus 2 increase factor", "bonus 2 max"]]
+    data = pd.read_excel("lf_data.xlsx", sheet_name=1)
+    # Move high performance transformer tech bonus to column bonus 1
+    data.loc[data["Name EN"] == "High-Performance Transformer", ["bonus 1 base value", "bonus 1 increase factor", "bonus 1 max"]] = data.loc[data["Name EN"] == "High-Performance Transformer", ["bonus 2 base value", "bonus 2 increase factor", "bonus 2 max"]].values
+    # Remove buildings not available to lifeform
     data = data[(data["Lifeform"] == lifeform) | (data["Type"] != "Building")]
-    data = data[data[["Type", "Lifeform"]].apply(lambda x: x[0] == "Building" or LIFEFORM[TECHS[int(x[0].split(" ")[-1])]] == x[1], axis=1)]
+    # Remove techs not selected
+    data = data[data.apply(lambda x: x["Type"] == "Building" or LIFEFORM[TECHS[int(x["Type"].split(" ")[-1])]] == x["Lifeform"], axis=1)]
+    # Initialise level
     data["level"] = 0
+    # Flag resource bonus type
     for ressource in ["metal", "crystal", "deuterium"]:
         data[ressource] = data["Description EN"].apply(lambda x: ressource in x)
+    # Set bonuses for collector enhancement
+    data.loc[data["Name EN"] == "Rock’tal Collector Enhancement", ["metal", "crystal", "deuterium"]] = [True, True, True]
+    data.loc[data["Name EN"] == "Rock’tal Collector Enhancement", "bonus 1 base value"] *= 0.25
+    # Set tech bonus type
     data["tech"] = False
     data.loc[data["Name EN"].isin(["Metropolis", "High-Performance Transformer", "Chip Mass Production"]), "tech"] = True
+    # Remove entries without bonuses
     data = data[data[["metal", "crystal", "deuterium", "tech"]].any(axis=1)]
+    # Calculate dse base cost
     data["dse_base_cost"] = data[["metal base cost", "crystal base cost", "deut base cost"]].apply(calc_dse, axis=1)
-    data["dse_bonus"] = data.apply(lambda x: calc_bonus(x, offset=1), axis=1)
-    data["dse_bonus_base"] = data["dse_bonus"]
-    data.loc[data["tech"], "dse_bonus"] = data[data["tech"]][["bonus 1 base value", "bonus 1 increase factor", "level"]].apply(calc_cost, axis=1) / 100
+    # Calculate dse bonus
+    data["dse_base_bonus"] = data.apply(lambda x: calc_bonus(x, offset=1), axis=1)
     cummulative_dse_cost = [0]
     total_dse_bonus = [0]
     while cummulative_dse_cost[-1] <= max_dse:
-        index, stats = step(data, debug)
-        data.loc[index, "level"] += 1
-        assert stats[0] >= 0, f"iteration {i}: \n {data.loc[index]}"
-        cummulative_dse_cost.append(cummulative_dse_cost[-1] + stats[0])
-        total_dse_bonus.append(stats[1])
-        assert total_dse_bonus[-2] <= total_dse_bonus[-1], data.loc[index]
+        index = step(data, debug)
+        cummulative_dse_cost.append(cummulative_dse_cost[-1] + data.loc[index]["new_dse_cost"])
+        total_dse_bonus.append(data["current_dse_bonus"].sum())
     plot = pd.DataFrame()
     plot["cummulative_dse_cost"] = cummulative_dse_cost
     plot["total_dse_bonus"] = total_dse_bonus
-    print(lifeform)
+    print(lifeform, cummulative_dse_cost[-1], data["current_dse_bonus"].sum())
     print(data[["Name EN", "level"]])
     return plot
 
 
 if __name__ == '__main__':
-    max_dse = 15e9
-    human = build_plot("Human", max_dse)
-    rock = build_plot("Rock´tal", max_dse)
+    max_dse = 250e9
+    debug = False
+    human = build_plot("Human", max_dse, debug=True)
+    rock = build_plot("Rock´tal", max_dse, debug=debug)
+    mecha = build_plot("Mecha", max_dse, debug=debug)
     plt.plot(human["cummulative_dse_cost"], human["total_dse_bonus"])
     plt.plot(rock["cummulative_dse_cost"], rock["total_dse_bonus"])
+    plt.plot(mecha["cummulative_dse_cost"], mecha["total_dse_bonus"])
     plt.xlabel("Investierte Deuterium Standard Einheiten (DSE)")
     plt.ylabel("Bonus auf DSE Produktion")
-    plt.legend(["Menschen", "Rocks"],loc="lower right")
+    plt.legend(["Menschen", "Rocks", "Mecha"],loc="lower right")
     plt.show()
