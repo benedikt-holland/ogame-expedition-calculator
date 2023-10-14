@@ -71,13 +71,15 @@ def step(data, debug=False):
     tech_bonus = 0
     if data["tech"].any():
         tech_bonus = sum(data[data["tech"]].apply(calc_tech_bonus, axis=1))
+    data["current_dse_bonus"] = data.apply(lambda x: calc_bonus(x, tech_bonus=tech_bonus), axis=1)
     data["new_dse_bonus"] = data.apply(lambda x: calc_bonus(x, tech_bonus=tech_bonus, offset=1), axis=1)
     if data["tech"].any():
-        data.loc[data["tech"], "new_dse_bonus"] = data[data["tech"]].apply(lambda x: calc_tech_bonus(x, offset=1), axis=1)
-        data.loc[data["tech"], "new_dse_bonus"] = data[data["tech"]].apply(lambda x: data.apply(lambda y: calc_bonus(y, tech_bonus=x["new_dse_bonus"]), axis=1)[data["Type"] != "Building"].sum(), axis=1)
+        data.loc[data["tech"], "new_dse_bonus"] = data[data["tech"]].apply(lambda x: calc_tech_bonus(x, offset=1), axis=1) - data[data["tech"]].apply(lambda x: calc_tech_bonus(x), axis=1)
+        tech = data[data["tech"]].apply(lambda x: data.apply(lambda y: calc_bonus(y, tech_bonus=(x["new_dse_bonus"]+tech_bonus)), axis=1), axis=1)
+        data.loc[data["tech"], "new_dse_bonus"] = (tech-data["current_dse_bonus"]).loc[:, (data["Type"] != "Building") & (~data["tech"])].sum(axis=1)
     data["new_dse_cost"] = data.apply(lambda x: calc_cost(x["dse_base_cost"], x["metal increase factor"], x["level"]), axis=1)
-    data["new_bonus_cost_ratio"] = data["new_dse_bonus"] / data["new_dse_cost"]
-    index = data["new_bonus_cost_ratio"].idxmax()
+    data["new_bonus_cost_ratio"] = data["new_dse_cost"] /  data["new_dse_bonus"]
+    index = data["new_bonus_cost_ratio"].idxmin()
     data.loc[index, "level"] += 1
     if data["tech"].any():
         tech_bonus = sum(data[data["tech"]].apply(calc_tech_bonus, axis=1))
@@ -102,6 +104,7 @@ def build_plot(lifeform, max_dse, debug=False):
         data[ressource] = data["Description EN"].apply(lambda x: ressource in x)
     # Set bonuses for collector enhancement
     data.loc[data["Name EN"] == "Rock’tal Collector Enhancement", ["metal", "crystal", "deuterium"]] = [True, True, True]
+    # Collector bonus +25% flat, Crawler bonus is negated by hard limit
     data.loc[data["Name EN"] == "Rock’tal Collector Enhancement", "bonus 1 base value"] *= 0.25
     # Set tech bonus type
     data["tech"] = False
@@ -127,15 +130,12 @@ def build_plot(lifeform, max_dse, debug=False):
 
 
 if __name__ == '__main__':
-    max_dse = 250e9
+    max_dse = 1e15
     debug = False
-    human = build_plot("Human", max_dse, debug=True)
-    rock = build_plot("Rock´tal", max_dse, debug=debug)
-    mecha = build_plot("Mecha", max_dse, debug=debug)
-    plt.plot(human["cummulative_dse_cost"], human["total_dse_bonus"])
-    plt.plot(rock["cummulative_dse_cost"], rock["total_dse_bonus"])
-    plt.plot(mecha["cummulative_dse_cost"], mecha["total_dse_bonus"])
+    for lifeform in LIFEFORM.values():
+        plot = build_plot(lifeform, max_dse, debug)
+        plt.plot(plot["cummulative_dse_cost"], plot["total_dse_bonus"])
     plt.xlabel("Investierte Deuterium Standard Einheiten (DSE)")
     plt.ylabel("Bonus auf DSE Produktion")
-    plt.legend(["Menschen", "Rocks", "Mecha"],loc="lower right")
+    plt.legend(LIFEFORM.values(),loc="lower right")
     plt.show()
