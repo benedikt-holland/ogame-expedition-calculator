@@ -57,10 +57,10 @@ int main() {
 
 int simulate_battle(int *attacker, int att_size, int *defender, int def_size) {
     srand(time(NULL));
-    struct Fleet * att_fleet = construct_fleet(attacker, att_size);
-    struct Fleet * def_fleet = construct_fleet(defender, def_size);
+    Fleet * att_fleet = construct_fleet(attacker, att_size);
+    Fleet * def_fleet = construct_fleet(defender, def_size);
     for (int round=0;round<6;round++) {
-        struct Fleet * def_copy = (struct Ship*)malloc(def_size * sizeof(struct Ship));
+        Fleet * def_copy = (Ship*)malloc(def_size * sizeof(Ship));
         memcpy(&def_copy, &def_fleet, sizeof(def_fleet));
         simulate_round(att_fleet, def_fleet);
         simulate_round(def_copy, att_fleet);
@@ -76,22 +76,22 @@ int simulate_battle(int *attacker, int att_size, int *defender, int def_size) {
     return 0;
 }
 
-struct Fleet * construct_fleet(int * fleet_spec, int fleet_size) {
+Fleet * construct_fleet(int * fleet_spec, int fleet_size) {
     // Initialize subfleets
-    struct Subfleet * subfleets = (struct Subfleet*)malloc(NUM_SHIP_TYPES*sizeof(struct Subfleet));
+    Subfleet * subfleets = (Subfleet*)malloc(NUM_SHIP_TYPES*sizeof(Subfleet));
     for (int i=0; i<NUM_SHIP_TYPES;i++) { 
-        struct Subfleet * subfleet = subfleets+i;
+        Subfleet * subfleet = subfleets+i;
         subfleet->exists = false;
     }
     // Initiliaze ships in fleet
-    struct Ship * ships = (struct Ship*)malloc(fleet_size * sizeof(struct Ship));
+    Ship * ships = (Ship*)malloc(fleet_size * sizeof(Ship));
     for (int i=0; i<fleet_size;i++) {
-        struct Ship * ship = ships+i;
+        Ship * ship = ships+i;
         int ship_type = *(fleet_spec+3*i);
         ship->type = ship_type;
         ship->hull = *(fleet_spec+3*i+1);
         ship->shield = *(fleet_spec+3*i+2);
-        struct Subfleet * subfleet = subfleets+ship_type;
+        Subfleet * subfleet = subfleets+ship_type;
         if (!subfleet->exists) {
             subfleet->exists = true;
             subfleet->ship = ship;
@@ -101,15 +101,15 @@ struct Fleet * construct_fleet(int * fleet_spec, int fleet_size) {
         }
     }
     // Pack together into single struct
-    struct Fleet * fleet = (struct Fleet*)malloc(sizeof(struct Fleet));
+    Fleet * fleet = (Fleet*)malloc(sizeof(Fleet));
     fleet->fleet = ships;
     fleet->subfleets = subfleets;
     fleet->size = fleet_size;
     return fleet;
 }
 
-void fire(struct Ship * ship, int target_idx, struct Fleet * def_fleet) {
-    struct Ship * target = def_fleet+target_idx;
+void fire(Ship * ship, int target_idx, Fleet * def_fleet) {
+    Ship * target = def_fleet+target_idx;
     int shield = target->shield - DMG[ship->type];
     if (target->shield == 0 || (float)DMG[ship->type] / target->shield > 0.01) {
         if (shield < 0) {
@@ -133,20 +133,20 @@ void fire(struct Ship * ship, int target_idx, struct Fleet * def_fleet) {
     }
 }
 
-void simulate_round(struct Fleet * att_fleet, struct Fleet * def_fleet) {
+void simulate_round(Fleet * att_fleet, Fleet * def_fleet) {
     for (int att_idx=0;att_idx<att_fleet->size;att_idx++) {
-        struct Ship * att_ship = att_fleet+att_idx;
+        Ship * att_ship = att_fleet+att_idx;
         int target_idx= rand_lim(def_fleet->size);
         fire(att_ship, target_idx, def_fleet);
         // Rapidfire
         for (int i=0; i<NUM_SHIP_TYPES; i++) {
             int rapidfire = RAPIDFIRE[att_ship->type][i];
-            struct Subfleet * fleet_of_type = def_fleet->subfleets+i;
+            Subfleet * fleet_of_type = def_fleet->subfleets+i;
             if (rapidfire > 0 && fleet_of_type->exists) {
                 // Need a map of how many of each ship types are left
                 while ((rapidfire-1)/rapidfire <= (float)rand()/(float)RAND_MAX) {
                     int rapidfire_target_idx = rand_lim(fleet_of_type->size);
-                    struct Ship * rapidfire_target = fleet_of_type->ship+rapidfire_target_idx;
+                    Ship * rapidfire_target = fleet_of_type->ship+rapidfire_target_idx;
                     fire(att_ship, rapidfire_target, def_fleet);
                 }
             }
@@ -154,7 +154,7 @@ void simulate_round(struct Fleet * att_fleet, struct Fleet * def_fleet) {
     }   
     // Recharge shields
     for (int def_idx=0; def_idx<def_fleet->size; def_idx++) {
-        struct Ship * ship = def_fleet+def_idx;
+        Ship * ship = def_fleet+def_idx;
         ship->shield=SHIELD[ship->type];
     }
 }
