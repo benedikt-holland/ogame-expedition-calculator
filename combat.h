@@ -2,8 +2,8 @@
 #define HULL 0
 #define SHIELD 1
 #define DMG 2
-// LJ, SJ, Xer, SS, Sxer, BB, Zerri, RIP, RAPIDFIRE, PF, KT, GT, Kolo, Rec, Spio
-int SHIP_STATS[3][NUM_SHIP_TYPES] = {
+const char SHIP_NAMES[NUM_SHIP_TYPES][6] = {"LJ", "SJ", "Xer", "SS", "SXer", "BB", "Zerri", "RIP", "RP", "PF", "KT", "GT", "Kolo", "Rec", "Spio"};
+const int SHIP_STATS[3][NUM_SHIP_TYPES] = {
     {400, 1000, 2700, 6000, 7000, 7500, 11000, 900000, 14000, 2300, 400, 1200, 3000, 1600, 100}, //Hull
     {10, 25, 50, 200, 400, 500, 500, 50000, 700, 100, 10, 25, 100, 10, 0}, // Shield
     {50, 150, 400, 1000, 700, 1000, 2000, 200000, 2800, 200, 5, 5, 50, 1, 0} // Damage
@@ -48,7 +48,15 @@ typedef struct Fleet {
     struct Subfleet * subfleets;
 } Fleet;
 
-int simulate_battle(Subfleet * attacker, int attacker_size, Subfleet * defender, int defender_size, int stats[3][NUM_SHIP_TYPES]);
+typedef struct Battleresult {
+    struct Subfleet * attacker;
+    struct Subfleet * defender;
+    int rounds;
+    int winner;
+} Battleresult;
+
+Battleresult * simulate(int attacker_fleet[], int defender_fleet[], int stats[3][NUM_SHIP_TYPES], int iterations);
+Battleresult * simulate_battle(Subfleet * attacker, int attacker_size, Subfleet * defender, int defender_size, int stats[3][NUM_SHIP_TYPES]);
 Fleet * construct_fleet(Subfleet * subfleets, int fleet_size, int stats[3][NUM_SHIP_TYPES]);
 void fire(Ship * ship, int target_idx, Fleet * def_fleet, int stats[3][NUM_SHIP_TYPES]);
 void simulate_round(Fleet * att_fleet, Fleet * def_fleet, int stats[3][NUM_SHIP_TYPES]);

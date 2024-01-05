@@ -3,59 +3,99 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include "simulate.h"
+#include "combat.h"
 
 int main() {
-    int attacker_fleet[15] = {0};
-    int defender_fleet[15] = {0};
-    attacker_fleet[6] = 70000;
-    defender_fleet[7] = 1000;
-    int attacker_size = 0;
-    int defender_size = 0;
-    for (int type=0;type<NUM_SHIP_TYPES;type++) {
-        attacker_size += attacker_fleet[type];
-        defender_size += defender_fleet[type];
+    int attacker[15] = {0};
+    int defender[15] = {0};
+    attacker[0] = 30000;
+    defender[2] = 2000;
+    Battleresult * result = simulate(attacker, defender, SHIP_STATS, 10);
+    switch (result->winner)
+    {
+    case 0:
+        printf("Defender wins after %d rounds", result->rounds);
+        break;
+    case 2:
+        printf("Attacker wins after %d rounds", result->rounds);
+        break;
+    case 1:
+        printf("Draw after %d rounds", result->rounds);
+        break;
     }
-    Subfleet * attacker = (Subfleet*)malloc(NUM_SHIP_TYPES * sizeof(Subfleet));
-    Subfleet * defender = (Subfleet*)malloc(NUM_SHIP_TYPES * sizeof(Subfleet));
     for (int type=0;type<NUM_SHIP_TYPES;type++) {
-        Subfleet * att_subfleet = attacker+type;
-        Subfleet * def_subfleet = defender+type;
-        att_subfleet->ship = NULL;
-        att_subfleet->size = attacker_fleet[type];
-        att_subfleet->exists = att_subfleet->size > 0;
-        def_subfleet->ship = NULL;
-        def_subfleet->size = defender_fleet[type];
-        def_subfleet->exists = def_subfleet->size > 0;
+        printf("\n%s: %d - %d", SHIP_NAMES[type], (((Subfleet*)result->attacker)+type)->size, (((Subfleet*)result->defender)+type)->size);
     }
-    int winner = simulate_battle(attacker, attacker_size, defender, defender_size, SHIP_STATS);
-    switch (winner) {
-        case 0: printf("Draw"); break;
-        case 1: printf("Attacker wins"); break;
-        case 2: printf("Defender wins"); break;
-        default: printf("Error, unknown return signal %d", winner); break;
-    } 
     return 1;
 }
 
-int simulate_battle(Subfleet * attacker, int attacker_size, Subfleet * defender, int defender_size, int stats[3][NUM_SHIP_TYPES]) {
+Battleresult * simulate(int attacker_fleet[], int defender_fleet[], int stats[3][NUM_SHIP_TYPES], int iterations) {
+    Battleresult * result = NULL;
+    for (int i=0;i<iterations;i++) {
+        int attacker_size = 0;
+        int defender_size = 0;
+        for (int type=0;type<NUM_SHIP_TYPES;type++) {
+            attacker_size += attacker_fleet[type];
+            defender_size += defender_fleet[type];
+        }
+        Subfleet * attacker = (Subfleet*)malloc(NUM_SHIP_TYPES * sizeof(Subfleet));
+        Subfleet * defender = (Subfleet*)malloc(NUM_SHIP_TYPES * sizeof(Subfleet));
+        for (int type=0;type<NUM_SHIP_TYPES;type++) {
+            Subfleet * att_subfleet = attacker+type;
+            Subfleet * def_subfleet = defender+type;
+            att_subfleet->ship = NULL;
+            att_subfleet->size = attacker_fleet[type];
+            att_subfleet->exists = att_subfleet->size > 0;
+            def_subfleet->ship = NULL;
+            def_subfleet->size = defender_fleet[type];
+            def_subfleet->exists = def_subfleet->size > 0;
+        }
+        Battleresult * iteration_result = simulate_battle(attacker, attacker_size, defender, defender_size, stats);
+        if (result == NULL) {
+            result = iteration_result;
+        } else {
+            result->rounds += iteration_result->rounds;
+            result->winner += iteration_result->winner;
+            for (int type=0;type<NUM_SHIP_TYPES;type++) {
+                (((Subfleet*)result->attacker)+type)->size += (((Subfleet*)iteration_result->attacker)+type)->size;
+                (((Subfleet*)result->defender)+type)->size += (((Subfleet*)iteration_result->defender)+type)->size;
+            }
+        }
+    }
+    result->rounds /= iterations;
+    result->winner /= iterations;
+    for (int type=0;type<NUM_SHIP_TYPES;type++) {
+        (((Subfleet*)result->attacker)+type)->size /= iterations;
+        (((Subfleet*)result->defender)+type)->size /= iterations;
+    }
+    return result;
+}
+
+Battleresult * simulate_battle(Subfleet * attacker, int attacker_size, Subfleet * defender, int defender_size, int stats[3][NUM_SHIP_TYPES]) {
     srand(time(NULL));
+    Battleresult * result = (Battleresult*)malloc(sizeof(Battleresult));
     Fleet * att_fleet = construct_fleet(attacker, attacker_size, stats);
     Fleet * def_fleet = construct_fleet(defender, defender_size, stats);
-    for (int round=0;round<6;round++) {
+    int round;
+    for (round=0;round<6;round++) {
         Fleet * def_copy = construct_fleet(defender, def_fleet->size, stats);
         simulate_round(att_fleet, def_fleet, stats);
         simulate_round(def_copy, att_fleet, stats);
-        printf("Round: %d, Attacker: %d, Defender: %d\n", round+1, att_fleet->size, def_fleet->size);
         if (att_fleet->size != 0 && def_fleet->size == 0) {
-            return 1;
+            result->winner=2;
+            break;
         } else if (att_fleet->size == 0 && def_fleet->size != 0) {
-            return 2;
+            result->winner=0;
+            break;
         } else if (att_fleet->size == 0 && def_fleet->size == 0) {
-            return 0;
+            result->winner=1;
+            break;
         }
     }
-    return 0;
+    result->rounds = round+1;
+    result->attacker=attacker;
+    result->defender=defender;
+    return result;
 }
 
 Fleet * construct_fleet(Subfleet * subfleets, int fleet_size, int stats[3][NUM_SHIP_TYPES]) {
