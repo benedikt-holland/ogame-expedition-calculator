@@ -1,11 +1,25 @@
+// Single ship within a fleet
 struct Ship {
     unsigned short int type;
     int hull;
     int shield;
 };
 
-int simulate(int *attacker, int att_size, int *defender, int def_size);
-struct Ship * construct_fleet(int * fleet_spec, int fleet_size);
-void fire(struct Ship * ship, struct Ship * target);
-int fire_fleet(struct Ship * att_fleet, int att_size, struct Ship * def_fleet, int def_size);
+// Keeps track of each type of ships in the fleet
+struct Subfleet {
+    struct Ship * ship;
+    int size;
+    bool exists;
+};
+
+struct Fleet {
+    struct Ship * fleet;
+    int size;
+    struct Subfleet * subfleets;
+};
+
+int simulate_battle(int *attacker, int att_size, int *defender, int def_size);
+struct Fleet * construct_fleet(int * fleet_spec, int fleet_size;
+void fire(struct Ship * ship, int target_idx, struct Fleet * def_fleet) ;
+void simulate_round(struct Fleet * att_fleet, struct Fleet * def_fleet);
 int rand_lim(int limit);
